@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="bo">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>བོད་ཡིག་གི་གསལ་བྱེད་རྩེད་མོ། / 藏文连连看</title>
+    <style>
+        :root {
+            --bg-color: #f0fdf4;
+            --grid-bg: #dcfce7;
+            --text-color: #1f2937;
+        }
+        body {
+            font-family: 'Microsoft Himalaya', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #a7f3d0 0%, #6ee7b7 100%);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            touch-action: manipulation;
+            user-select: none;
+        }
+        .container {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 95vw;
+        }
+        h1 {
+            color: #166534;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        .score-board {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: #15803d;
+            font-weight: bold;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 4px;
+            background-color: #bbf7d0;
+            padding: 8px;
+            border-radius: 8px;
+            margin: 0 auto;
+            width: fit-content;
+        }
+        .cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            position: relative;
+        }
+        .cell:active {
+            transform: scale(0.9);
+        }
+        .cell.selected {
+            box-shadow: 0 0 0 3px #22c55e, 0 0 10px #22c55e;
+            transform: scale(1.1);
+            z-index: 10;
+        }
+        .cell.matched {
+            animation: pop 0.3s ease-out forwards;
+        }
+        
+        /* Colors matching Tailwind 500 */
+        .color-0 { background-color: #ef4444; } /* Red */
+        .color-1 { background-color: #f97316; } /* Orange */
+        .color-2 { background-color: #eab308; } /* Yellow */
+        .color-3 { background-color: #22c55e; } /* Green */
+        .color-4 { background-color: #3b82f6; } /* Blue */
+        .color-5 { background-color: #6366f1; } /* Indigo */
+        .color-6 { background-color: #a855f7; } /* Purple */
+
+        @keyframes pop {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        .btn {
+            background-color: #16a34a;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #15803d;
+        }
+        
+        .feedback {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(255, 255, 255, 0.95);
+            padding: 20px 40px;
+            border-radius: 12px;
+            font-size: 2rem;
+            color: #16a34a;
+            font-weight: bold;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .feedback.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1.1);
+        }
+
+        @media (max-width: 480px) {
+            .cell {
+                width: 32px;
+                height: 32px;
+                font-size: 18px;
+            }
+            h1 { font-size: 1.5rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>བོད་ཡིག་གི་གསལ་བྱེད་རྩེད་མོ།<br><span style="font-size: 0.8em; color: #4b5563;">藏文连连看</span></h1>
+    
+    <div class="score-board">
+        སྐར་གྲངས། / 分数: <span id="score">0</span>
+    </div>
+
+    <div id="grid" class="grid"></div>
+
+    <button class="btn" onclick="resetGame()">བསྐྱར་དུ་རྩེ། / 重置</button>
+</div>
+
+<div id="feedback" class="feedback"></div>
+
+<script>
+    // Game Constants
+    const ROWS = 8;
+    const COLS = 8;
+    const CANDY_TYPES = ['ཀ', 'ཁ', 'ག', 'ང', 'ཅ', 'ཆ', 'ཇ'];
+    const FEEDBACK_TEXTS = ['ཡག་པོ་འདུག / 棒!', 'ཧ་ཅང་ཡག་པོ། / 真棒!', 'ཨ་ཙི་རེད། / 太棒了!'];
+    
+    // Game State
+    let grid = [];
+    let score = 0;
+    let selectedCell = null;
+    let isProcessing = false;
+
+    // Audio Context
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        if (type === 'click') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        } else if (type === 'match') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(900, audioCtx.currentTime + 0.1);
+            // Little melody
+            setTimeout(() => {
+                const osc2 = audioCtx.createOscillator();
+                const gain2 = audioCtx.createGain();
+                osc2.connect(gain2);
+                gain2.connect(audioCtx.destination);
+                osc2.frequency.setValueAtTime(900, audioCtx.currentTime);
+                osc2.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                gain2.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                osc2.start();
+                osc2.stop(audioCtx.currentTime + 0.2);
+            }, 100);
+
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.2);
+        }
+    }
+
+    // Initialization
+    function initGame() {
+        const gridEl = document.getElementById('grid');
+        gridEl.innerHTML = '';
+        grid = [];
+        score = 0;
+        updateScore();
+        
+        // create initial grid (simple random for now, will fix matches immediately after)
+        for (let r = 0; r < ROWS; r++) {
+            let row = [];
+            for (let c = 0; c < COLS; c++) {
+                let type;
+                do {
+                    type = Math.floor(Math.random() * CANDY_TYPES.length);
+                } while (
+                    (c >= 2 && row[c-1].type === type && row[c-2].type === type) ||
+                    (r >= 2 && grid[r-1][c].type === type && grid[r-2][c].type === type)
+                );
+                row.push({ type, id: `${r}-${c}` });
+            }
+            grid.push(row);
+        }
+        renderGrid();
+    }
+
+    function renderGrid() {
+        const gridEl = document.getElementById('grid');
+        gridEl.innerHTML = '';
+        
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cellData = grid[r][c];
+                if (cellData === null) {
+                    const empty = document.createElement('div');
+                    empty.className = 'cell empty';
+                    gridEl.appendChild(empty);
+                    continue;
+                }
+                
+                const cell = document.createElement('div');
+                cell.className = `cell color-${cellData.type}`;
+                cell.innerText = CANDY_TYPES[cellData.type];
+                cell.dataset.r = r;
+                cell.dataset.c = c;
+                
+                if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
+                    cell.classList.add('selected');
+                }
+                
+                cell.onclick = () => handleCellClick(r, c);
+                gridEl.appendChild(cell);
+            }
+        }
+    }
+
+    function handleCellClick(r, c) {
+        if (isProcessing) return;
+        
+        playSound('click');
+
+        if (!selectedCell) {
+            selectedCell = { r, c };
+            renderGrid();
+        } else {
+            const r1 = selectedCell.r;
+            const c1 = selectedCell.c;
+            
+            // If clicked same cell, deselect
+            if (r1 === r && c1 === c) {
+                selectedCell = null;
+                renderGrid();
+                return;
+            }
+
+            // Check adjacency
+            const isAdjacent = (Math.abs(r1 - r) === 1 && c1 === c) || (Math.abs(c1 - c) === 1 && r1 === r);
+            
+            if (isAdjacent) {
+                swapCells(r1, c1, r, c);
+                selectedCell = null;
+            } else {
+                selectedCell = { r, c }; // Select new
+            }
+            renderGrid();
+        }
+    }
+
+    async function swapCells(r1, c1, r2, c2) {
+        isProcessing = true;
+        
+        const gridEl = document.getElementById('grid');
+        const index1 = r1 * COLS + c1;
+        const index2 = r2 * COLS + c2;
+        let cell1 = gridEl.children[index1];
+        let cell2 = gridEl.children[index2];
+
+        // Visual Animation Forward
+        if (cell1 && cell2) {
+            const xDiff = (c2 - c1) * 100;
+            const yDiff = (r2 - r1) * 100;
+            
+            cell1.style.transition = 'transform 0.2s';
+            cell2.style.transition = 'transform 0.2s';
+            cell1.style.transform = `translate(${xDiff}%, ${yDiff}%)`;
+            cell2.style.transform = `translate(${-xDiff}%, ${-yDiff}%)`;
+            
+            await new Promise(res => setTimeout(res, 200));
+        }
+
+        // Swap in data
+        let temp = grid[r1][c1];
+        grid[r1][c1] = grid[r2][c2];
+        grid[r2][c2] = temp;
+        
+        renderGrid();
+        
+        // Check match
+        const matches = findMatches();
+        if (matches.length > 0) {
+            await processMatches(matches);
+        } else {
+            // Invalid Move: Swap back visuals
+            // Re-fetch cells after renderGrid (DOM nodes are new)
+            // But data is currently SWAPPED.
+            // So cell at index1 is actually the one that was at index2 originally.
+            // We want to animate them swapping back.
+            
+            cell1 = gridEl.children[index1];
+            cell2 = gridEl.children[index2];
+            
+            if (cell1 && cell2) {
+                 const xDiff = (c2 - c1) * 100;
+                 const yDiff = (r2 - r1) * 100;
+                 
+                 // Force reflow to ensure transition plays from 'none'
+                 void cell1.offsetWidth;
+                 
+                 cell1.style.transition = 'transform 0.2s';
+                 cell2.style.transition = 'transform 0.2s';
+                 
+                 cell1.style.transform = `translate(${xDiff}%, ${yDiff}%)`;
+                 cell2.style.transform = `translate(${-xDiff}%, ${-yDiff}%)`;
+                 
+                 await new Promise(res => setTimeout(res, 200));
+            }
+            
+            // Swap data back
+            temp = grid[r1][c1];
+            grid[r1][c1] = grid[r2][c2];
+            grid[r2][c2] = temp;
+            renderGrid();
+        }
+        
+        isProcessing = false;
+    }
+
+    function findMatches() {
+        let matchedSet = new Set();
+        
+        // Horizontal
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS - 2; c++) {
+                const type = grid[r][c]?.type;
+                if (type === undefined) continue;
+                if (grid[r][c+1]?.type === type && grid[r][c+2]?.type === type) {
+                    matchedSet.add(`${r},${c}`);
+                    matchedSet.add(`${r},${c+1}`);
+                    matchedSet.add(`${r},${c+2}`);
+                }
+            }
+        }
+        
+        // Vertical
+        for (let c = 0; c < COLS; c++) {
+            for (let r = 0; r < ROWS - 2; r++) {
+                const type = grid[r][c]?.type;
+                if (type === undefined) continue;
+                if (grid[r+1][c]?.type === type && grid[r+2][c]?.type === type) {
+                    matchedSet.add(`${r},${c}`);
+                    matchedSet.add(`${r+1},${c}`);
+                    matchedSet.add(`${r+2},${c}`);
+                }
+            }
+        }
+        
+        return Array.from(matchedSet).map(str => {
+            const [r, c] = str.split(',').map(Number);
+            return { r, c };
+        });
+    }
+
+    async function processMatches(matches) {
+        playSound('match');
+        
+        // Visual feedback
+        const gridEl = document.getElementById('grid');
+        matches.forEach(({r, c}) => {
+            // Find cell index (row-major)
+            const idx = r * COLS + c;
+            const cell = gridEl.children[idx];
+            if (cell) cell.classList.add('matched');
+        });
+
+        // Show feedback text if match is big
+        if (matches.length >= 4) {
+            showFeedback();
+        }
+
+        await new Promise(res => setTimeout(res, 300));
+
+        // Remove from data
+        matches.forEach(({r, c}) => {
+            grid[r][c] = null;
+        });
+        
+        score += matches.length * 10;
+        updateScore();
+        
+        // Drop down
+        applyGravity();
+        renderGrid();
+        
+        // Fill new
+        await new Promise(res => setTimeout(res, 200));
+        fillNewCells();
+        renderGrid();
+        
+        // Chain reaction
+        const newMatches = findMatches();
+        if (newMatches.length > 0) {
+            await new Promise(res => setTimeout(res, 300));
+            await processMatches(newMatches);
+        }
+    }
+
+    function applyGravity() {
+        for (let c = 0; c < COLS; c++) {
+            let writeIdx = ROWS - 1;
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (grid[r][c] !== null) {
+                    grid[writeIdx][c] = grid[r][c];
+                    if (writeIdx !== r) grid[r][c] = null;
+                    writeIdx--;
+                }
+            }
+        }
+    }
+
+    function fillNewCells() {
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c] === null) {
+                    const type = Math.floor(Math.random() * CANDY_TYPES.length);
+                    grid[r][c] = { type, id: `new-${Date.now()}-${r}-${c}` };
+                }
+            }
+        }
+    }
+
+    function updateScore() {
+        document.getElementById('score').innerText = score;
+    }
+
+    function showFeedback() {
+        const fb = document.getElementById('feedback');
+        const text = FEEDBACK_TEXTS[Math.floor(Math.random() * FEEDBACK_TEXTS.length)];
+        fb.innerText = text;
+        fb.classList.add('show');
+        setTimeout(() => fb.classList.remove('show'), 1500);
+    }
+
+    function resetGame() {
+        initGame();
+    }
+
+    // Start
+    initGame();
+</script>
+
+</body>
+</html>
